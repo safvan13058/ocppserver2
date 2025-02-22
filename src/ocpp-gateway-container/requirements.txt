@@ -1,0 +1,4 @@
+boto3
+websockets
+paho-mqtt==1.6.1
+asyncio-mqtt
