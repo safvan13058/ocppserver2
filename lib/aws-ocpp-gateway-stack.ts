@@ -93,11 +93,13 @@ export class AwsOcppGatewayStack extends cdk.Stack {
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
       vpc,
-      containerInsightsV2: { containerInsightsEnabled: true },
-      executeCommandConfiguration: { logging: ecs.ExecuteCommandLogging.DEFAULT },
+      containerInsights: true,  // ✅ Reverted to ensure compatibility with current CDK versions
+      executeCommandConfiguration: {
+        logging: ecs.ExecuteCommandLogging.DEFAULT,
+      },
     });
 
-    const gatewayRole = new iam.Role(this, 'Role', {
+    const gatewayRole = new iam.Role(this, 'GatewayRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
     chargePointTable.grantReadData(gatewayRole);
@@ -109,12 +111,12 @@ export class AwsOcppGatewayStack extends cdk.Stack {
       ],
     });
 
-    const ocppGatewayLogGroup = new logs.LogGroup(this, 'LogGroup', {
+    const ocppGatewayLogGroup = new logs.LogGroup(this, 'OcppGatewayLogGroup', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       retention: logs.RetentionDays.THREE_DAYS,
     });
 
-    const gatewayTaskDefinition = new ecs.FargateTaskDefinition(this, 'Task', {
+    const gatewayTaskDefinition = new ecs.FargateTaskDefinition(this, 'GatewayTaskDefinition', {
       memoryLimitMiB: 1024,
       cpu: 512,
       taskRole: gatewayRole,
@@ -130,9 +132,12 @@ export class AwsOcppGatewayStack extends cdk.Stack {
       { platform }
     );
 
-    const container = gatewayTaskDefinition.addContainer('Container', {
+    const container = gatewayTaskDefinition.addContainer('GatewayContainer', {
       image: gatewayContainerImage,
-      logging: new ecs.AwsLogDriver({ streamPrefix: 'Gateway', logGroup: ocppGatewayLogGroup }),
+      logging: new ecs.AwsLogDriver({
+        streamPrefix: 'Gateway',
+        logGroup: ocppGatewayLogGroup,
+      }),
       environment: {
         AWS_REGION: cdk.Stack.of(this).region,
         DYNAMODB_CHARGE_POINT_TABLE: chargePointTable.tableName,
@@ -143,23 +148,32 @@ export class AwsOcppGatewayStack extends cdk.Stack {
       },
     });
 
-    container.addUlimits({ name: UlimitName.NOFILE, softLimit: 65536, hardLimit: 65536 });
-    container.addPortMappings({ containerPort: tcpPort, hostPort: tcpPort, protocol: ecs.Protocol.TCP });
+    container.addUlimits({
+      name: UlimitName.NOFILE,
+      softLimit: 65536,
+      hardLimit: 65536,
+    });
 
-    const gatewayService = new ecs.FargateService(this, 'Service', {
+    container.addPortMappings({
+      containerPort: tcpPort,
+      hostPort: tcpPort,
+      protocol: ecs.Protocol.TCP,
+    });
+
+    const gatewayService = new ecs.FargateService(this, 'GatewayService', {
       cluster,
       taskDefinition: gatewayTaskDefinition,
       desiredCount: 1,
       minHealthyPercent: 0,
     });
 
-    const loadBalancer = new elbv2.NetworkLoadBalancer(this, 'LoadBalancer', {
+    const loadBalancer = new elbv2.NetworkLoadBalancer(this, 'OcppGatewayLoadBalancer', {
       vpc,
       loadBalancerName: 'ocpp-gateway',
       internetFacing: true,
     });
 
-    const listener = loadBalancer.addListener('TCPListener', {
+    const listener = loadBalancer.addListener('GatewayListener', {
       port: props?.domainName ? tlsPort : 80,
       protocol: props?.domainName ? elbv2.Protocol.TLS : elbv2.Protocol.TCP,
     });
@@ -175,11 +189,11 @@ export class AwsOcppGatewayStack extends cdk.Stack {
       },
     });
 
-    new cdk.CfnOutput(this, 'websocketURL', {
+    new cdk.CfnOutput(this, 'WebSocketURL', {
       value: props?.domainName
         ? `wss://gateway.${props.domainName}`
         : `ws://${loadBalancer.loadBalancerDnsName}`,
-      description: 'The Gateway websocket URL',
+      description: 'The Gateway WebSocket URL',
     });
   }
 }
