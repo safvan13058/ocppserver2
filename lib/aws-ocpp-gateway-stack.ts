@@ -76,6 +76,7 @@ export class AwsOcppGatewayStack extends cdk.Stack {
         physicalResourceId: cr.PhysicalResourceId.of(Date.now().toString()),
       },
     });
+
     const iotEndpoint = iotDescribeEndpointCr.getResponseField('endpointAddress');
 
     const chargePointTable = new dynamodb.Table(this, 'ChargePointTable', {
@@ -87,13 +88,15 @@ export class AwsOcppGatewayStack extends cdk.Stack {
 
     new iot_core.TopicRule(this, 'CreateThingRule', {
       description: 'Insert new IOT Thing reference into DynamoDB',
-      sql: iot_core.IotSql.fromStringAsVer20160323("SELECT thingName as chargePointId FROM '$aws/events/thing/+/created'"),
+      sql: iot_core.IotSql.fromStringAsVer20160323(
+        "SELECT thingName as chargePointId FROM '$aws/events/thing/+/created'"
+      ),
       actions: [new actions.DynamoDBv2PutItemAction(chargePointTable)],
     });
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
       vpc,
-      containerInsights: true,  // ✅ Reverted to ensure compatibility with current CDK versions
+      containerInsightsV2: { containerInsightsEnabled: true },
       executeCommandConfiguration: {
         logging: ecs.ExecuteCommandLogging.DEFAULT,
       },
